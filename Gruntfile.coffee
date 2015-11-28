@@ -2,7 +2,7 @@
 Configures the grunt tasks needed to build and run the application.
 ###
 
-_ = require 'lodash'
+_ = require('lodash')
 
 ###
 Configures the grunt parallel task so that we can run a set of replicated servers on the given list of ports in parallel.
@@ -13,7 +13,7 @@ Configures the grunt parallel task so that we can run a set of replicated server
 @param list[number] ports
 ###
 initParallelTaskConfig = (grunt, ports) ->
-  grunt.loadNpmTasks 'grunt-parallel'
+  grunt.loadNpmTasks('grunt-parallel')
   portsAsString = ports.join(',')
   grunt.config 'parallel',
     server:
