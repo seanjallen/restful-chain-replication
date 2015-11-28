@@ -2,6 +2,9 @@
   "name": "restful-chain-replication",
   "version": "0.0.1",
   "dependencies": {
-    "express": "^4.13.3"
+    "express": "^4.13.3",
+    "grunt": "^0.4.5",
+    "grunt-parallel": "^0.4.1",
+    "lodash": "^3.10.1"
   }
 }
