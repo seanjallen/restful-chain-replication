@@ -154,8 +154,12 @@ class Server
     requestHelper.post(successorUpdateURL)
 
     # When the request is acked from our successor
-    # (note that error responses do not trigger the response event and are thus no-ops)
+    # (note that error responses do not trigger the response event and are thus no-ops, they'll be sent again to a new
+    # successor after we get a notification from the master that the old successor has failed)
     .on 'response', =>
+      if @failed
+        response.sendStatus(500)
+        return
       update = _.findWhere(@sent, {seqNum: seqNum})
       if update?
 
@@ -191,6 +195,8 @@ class Server
       response.sendStatus(500)
       return
     @failed = true
+    @pending = []
+    @sent = []
     @master.fail(@myPort)
     response.send("Server #{@myPort} has been killed.")
 
