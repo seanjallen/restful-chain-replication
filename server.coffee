@@ -85,7 +85,10 @@ class Server
       response.status(400).send("#{@myPort} is not the head server, please send update requests to: #{@master.getHead()}")
       return
 
-    # All servers process requests in FIFO order, if a request got here unusally fast, queue it
+    # All servers process requests in FIFO order, if a request got here unusally fast (> clock+1), queue it
+    # Also if this is a duplicate request that we have already processed (<= clock, which can happen if one of our
+    # predecessors failed and their predecessor never received an ack for the update), queue it and we will re-ack it
+    # when the original update request can be acked
     if seqNum? and parseInt(seqNum) isnt (@clock+1)
       @pending.push
         id: id
@@ -93,6 +96,7 @@ class Server
         seqNum: seqNum
         request: request
         response: response
+      @ackDuplicatePendingUpdates()
       return
 
     @clock++
@@ -121,7 +125,7 @@ class Server
 
     # If I'm the tail, the update has been replicated everywhere
     if @master.isTail(@myPort)
-      @updateComplete(response, id, value)
+      @updateComplete(response)
 
     # If I'm not the tail, we need to replicate the update down the chain
     else
@@ -152,16 +156,32 @@ class Server
     # When the request is acked from our successor
     # (note that error responses do not trigger the response event and are thus no-ops)
     .on 'response', =>
-      update = _.findWhere({seqNum: seqNum})
+      update = _.findWhere(@sent, {seqNum: seqNum})
       if update?
 
         # Remove request from list of requests that need to be replicated down the chain
         @sent = _.reject(@sent, {seqNum: seqNum})
 
         # Send ack to predecessor, or tell the client that the update is complete
-        @updateComplete(response, id, value)
+        @updateComplete(response)
 
-  updateComplete: (response, id, value) -> response.send("value: #{value} stored for id: #{id} at all servers in chain")
+  ###
+  Resolves the given http response for an update operation.
+  ###
+  updateComplete: (response, ackDuplicates=true) ->
+    response.send("Update complete.")
+    if ackDuplicates
+      @ackDuplicatePendingUpdates()
+
+  ###
+  Clears the pending request queue of any duplicate update requests we have received that have already been applied at
+  this server and replicated at all successor servers in the chain.
+  ###
+  ackDuplicatePendingUpdates: ->
+    alreadyAppliedUpdates = _.filter @pending, (pendingRequest) => pendingRequest.seqNum <= @clock
+    for update in alreadyAppliedUpdates
+      unless _.findWhere(@sent, {seqNum: update.seqNum})? # Unless this update hasn't been replicated yet
+        @updateComplete(update.response, false)
 
   ###
   Fail operation. Simulates a server failure.
@@ -185,7 +205,7 @@ class Server
       # If I'm the new tail, all of the update requests that I'm waiting to be acked have been replicated to all servers
       if @master.isTail(@myPort)
         for update in @sent
-          @updateComplete(update.response, update.id, update.value)
+          @updateComplete(update.response)
         @sent = []
 
       # Otherwise re-send all of the updates we have that haven't been acked yet so they can be replicated at our
