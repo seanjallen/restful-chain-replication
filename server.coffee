@@ -37,10 +37,16 @@ pending = []
 # Queue of update requests that have been processed and sent down the chain that we are waiting for an acknowledgement of
 sent = []
 
+# Whether or not this server has failed
+failed = false
+
 ###
 Query operation. A client of the service wants to know the value of the object with the given id.
 ###
 app.get '/query/:id', (request, response) ->
+  if failed
+    response.sendStatus(500)
+    return
 
   # I'm the tail in the chain! Respond to the query
   if master.isTail(myPort)
@@ -58,14 +64,16 @@ updateComplete = (response, id, value) -> response.send("value: #{value} stored 
 Replicates the update request with the given parameters to the successor server in the chain, and acknowledges the
 predecessor server (or the client if we're the head [see README for note on this]) once this is complete.
 ###
-replicateUpdate = (id, value, seqNum, request, response) ->
+replicateUpdate = (id, value, seqNum, request, response, sendingAgain=false) ->
 
   # Track list of replicated requests that need to be acknowledged
-  sent.push
-    id: id
-    value: value
-    seqNum: seqNum
-    response: response
+  unless sendingAgain
+    sent.push
+      id: id
+      value: value
+      seqNum: seqNum
+      request: request
+      response: response
 
   # Forward the request down the chain
   successorUpdateURL = "http://#{request.hostname}:#{master.getSuccessor(myPort)}/update/"
@@ -75,13 +83,16 @@ replicateUpdate = (id, value, seqNum, request, response) ->
   requestHelper.post(successorUpdateURL)
 
   # When the request is acked from our successor
+  # (note that error responses do not trigger the response event and are thus no-ops)
   .on 'response', ->
+    update = _.findWhere({seqNum: seqNum})
+    if update?
 
-    # Remove request from list of requests that need to be replicated down the chain
-    sent = _.reject sent, (element) -> element.seqNum is seqNum
+      # Remove request from list of requests that need to be replicated down the chain
+      sent = _.reject(sent, {seqNum: seqNum})
 
-    # Send ack to predecessor, or tell the client that the update is complete
-    updateComplete(response, id, value)
+      # Send ack to predecessor, or tell the client that the update is complete
+      updateComplete(response, id, value)
 
 ###
 Processes the update and then takes the appropriate action to ensure that it is also processed at all other servers.
@@ -102,6 +113,10 @@ Update operation. A client of the service wants to update the value of the objec
 is added internally to ensure that requests are forwarded along the chain in FIFO order.
 ###
 app.post '/update/:id/:value/:seqNum?', (request, response) ->
+  if failed
+    response.sendStatus(500)
+    return
+
   id = request.params.id
   value = request.params.value
   seqNum = request.params.seqNum
@@ -138,5 +153,36 @@ app.post '/update/:id/:value/:seqNum?', (request, response) ->
     pending = _.reject pending, (element) -> element.seqNum is nextRequest.seqNum
 
     nextRequest = _.findWhere(pending, {seqNum: nextRequest.seqNum+1})
+
+###
+Fail operation. Simulates a server failure.
+###
+app.delete '/server', (request, response) ->
+  if failed
+    response.sendStatus(500)
+    return
+  failed = true
+  master.fail(myPort)
+  response.send("Server #{myPort} has been killed.")
+
+###
+Notification from configuration service that the successor of the chain server running on the given port has failed.
+###
+master.on 'successorFailed', (port) ->
+
+  # My successor failed!
+  if port is myPort
+
+    # If I'm the new tail, all of the update requests that I'm waiting to be acked have been replicated to all servers
+    if master.isTail(myPort)
+      for update in sent
+        updateComplete(update.response, update.id, update.value)
+      sent = []
+
+    # Otherwise re-send all of the updates we have that haven't been acked yet so they can be replicated at our
+    # new successor in case they were lost by our old failed successor
+    else
+      for update in sent
+        replicateUpdate(update.id, update.value, update.seqNum, update.request, update.response, true)
 
 app.listen(myPort)
