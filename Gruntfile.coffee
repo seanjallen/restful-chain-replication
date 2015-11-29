@@ -19,13 +19,13 @@ initParallelTaskConfig = (grunt, ports) ->
     server:
       tasks: _.map(ports, (port) ->
         cmd: 'node'
-        args: ['server', port, portsAsString]
+        args: ['start', port, portsAsString]
       )
       stream: true
 
 module.exports = (grunt) ->
 
-  grunt.registerTask 'chain', 'Start a set of chain replicated servers on different ports.', (ports...) ->
+  grunt.registerTask 'start', 'Start a set of chain replicated servers on a given list of ports.', (ports...) ->
     if _.isEmpty(ports)
       grunt.log.error('Ports for servers to run on are required! See README.')
     else
