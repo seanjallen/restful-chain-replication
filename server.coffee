@@ -8,22 +8,28 @@ requestHelper = require('request')
 class Server
 
   # The data stored at this server, keyed as id => value
-  data: {}
+  data: null
 
   # A logical clock / sequence counter used to determine the order of requests that are handled by this server.
   # Chain replication assumes FIFO links between the servers in the chain, so we add sequence numbers to our forwarded
   # http requests to ensure that behavior
-  clock: 0
+  clock: null
 
   # Queue of update requests that are waiting to be processed by this server
-  pending: []
+  pending: null
 
   # Queue of update requests that have been processed and sent down the chain that we are waiting for an
   # acknowledgement of
-  sent: []
+  sent: null
 
   # Whether or not this server has failed
-  failed: false
+  failed: null
+
+  # The port that this server is running on
+  myPort: null
+
+  # The master configuration service that configures the state of the chain
+  master: null
 
   ###
   app - The running express app instance.
@@ -33,13 +39,23 @@ class Server
   constructor: (app, @myPort, @master) ->
     @setupExpressRoutes(app)
     @listenForConfigChanges()
+    @init()
+
+  init: ->
+    @failed = false
+    @clock = 0
+    @pending = []
+    @sent = []
+    @data = {}
 
   ###
   Setup REST API routes used by the server.
   ###
   setupExpressRoutes: (app) ->
     app.get '/query/:id', (request, response) => @query(request, response)
+    app.get '/new-tail/:port', (request, response) => @newTail(request, response)
     app.delete '/server', (request, response) => @fail(request, response)
+    app.put '/server', (request, response) => @restart(request, response)
 
     # The seqNum parameter is added internally to ensure that requests are forwarded along the chain in FIFO order.
     app.post '/update/:id/:value/:seqNum?', (request, response) => @update(request, response)
@@ -195,8 +211,6 @@ class Server
       response.sendStatus(500)
       return
     @failed = true
-    @pending = []
-    @sent = []
     @master.fail(@myPort)
     response.send("Server #{@myPort} has been killed.")
 
@@ -219,5 +233,57 @@ class Server
       else
         for update in @sent
           @replicateUpdate(update.id, update.value, update.seqNum, update.request, update.response, true)
+
+  ###
+  NewTail operation. A new server has been added to the chain and wants us (the old tail), to forward all of our data
+  down to them.
+  ###
+  newTail: (request, response) ->
+    if @failed
+      response.sendStatus(500)
+      return
+    response.json
+      clock: @clock
+      data: @data
+    @master.add(request.params.port)
+
+  ###
+  Restart operation, the failed server has been rebooted and wants to be added back into the chain as the new tail.
+  ###
+  restart: (request, response) ->
+    unless @failed
+      response.status(405)
+      response.send("Cannot restart a server that has not been failed.")
+      return
+    @askTailForData(response)
+
+  ###
+  Notifies the tail server in the chain that we want to be the new tail and asks it to forward all of the replicated
+  service data down to us.
+  ###
+  askTailForData: (response) ->
+    tailPort = @master.getTail()
+    if tailPort?
+      requestHelper.get "http://localhost:#{tailPort}/new-tail/#{@myPort}", (error, tailResponse, body) =>
+
+        # If the tail has failed, ask the new tail for data
+        if error
+          @master.fail(tailPort)
+          @askTailForData(response)
+
+        # If the tail is still up, initialize myself as the new tail
+        else
+          @master.add(@myPort)
+          @init()
+          tailState = JSON.parse(body)
+          @clock = tailState.clock
+          @data = tailState.data
+          response.send("#{@myPort} has been fully restarted and is now the new tail in the chain.")
+
+    # If the entire chain failed, not much we can do, so start a new chain!
+    else
+      @master.add(@myPort)
+      @init()
+      response.send("#{@myPort} has been fully restarted, but all previous data has been lost since all servers were failed at once.")
 
 module.exports = Server

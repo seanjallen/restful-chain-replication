@@ -72,6 +72,16 @@ class Master extends EventEmitter
       @emit('successorFailed', predecessor)
 
   ###
+  The server on the given port has been added to the chain as the new tail.
+  ###
+  add: (addPort, broadcast=true) ->
+    unless _.contains(@activePorts, addPort)
+      @activePorts.push(addPort)
+    if broadcast
+      for port in @allPorts
+        requestHelper.put("http://localhost:#{port}/sync/#{addPort}")
+
+  ###
   Open up express app routes used to keep this master instance in sync with all of the other instances.
   ###
   synchronize: ->
@@ -79,6 +89,11 @@ class Master extends EventEmitter
     # Failure notifications
     @app.delete '/sync/:port', (request, response) =>
       @fail(request.params.port, false)
+      response.sendStatus(200)
+
+    # Add new server notifications
+    @app.put '/sync/:port', (request, response) =>
+      @add(request.params.port, false)
       response.sendStatus(200)
 
 module.exports = Master
