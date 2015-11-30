@@ -167,15 +167,19 @@ class Server
     successorUpdateURL += encodeURIComponent(id) + '/'
     successorUpdateURL += encodeURIComponent(value) + '/'
     successorUpdateURL += encodeURIComponent(seqNum)
-    requestHelper.post(successorUpdateURL)
+    requestHelper.post successorUpdateURL, (error) =>
 
-    # When the request is acked from our successor
-    # (note that error responses do not trigger the response event and are thus no-ops, they'll be sent again to a new
-    # successor after we get a notification from the master that the old successor has failed)
-    .on 'response', =>
+      # If we have failed by the time we receive the ack from our successor, do not forward the ack to our predecessor
       if @failed
         response.sendStatus(500)
         return
+
+      # If our successor failed and thus cannot send an ack back to us saying that the update was replicated, do nothing,
+      # wait until we get a notification from the master chain config service and then take the appropriate action
+      if error
+        return
+
+      # Find the update request that was just acked from our successor
       update = _.findWhere(@sent, {seqNum: seqNum})
       if update?
 
