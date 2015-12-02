@@ -6,7 +6,8 @@
     "grunt": "^0.4.5",
     "grunt-contrib-coffee": "^0.13.0",
     "grunt-parallel": "^0.4.1",
-    "lodash": "^3.10.1"
+    "lodash": "^3.10.1",
+    "request": "^2.67.0"
   },
   "repository": {
     "type": "git",
