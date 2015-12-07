@@ -47,7 +47,7 @@ After you clone the repository, you can build and run it by running these comman
   
     grunt start:3000:3001:3002
 
-grunt start:3000:3001:3002 causes three servers to startup using chain replication. You can then point your browser and your favorite REST API tester to http://localhost:port/query/id and the rest of the endpoints described above and test out how they work.
+grunt start:3000:3001:3002 causes three servers to startup on ports 3000, 3001, and 3002 using chain replication (3000 is the head, 3002 is the tail). You can then point your browser and your favorite REST API tester to http://localhost:port/query/id and the rest of the endpoints described above and test out how they work.
 
 ## Caveats
 
